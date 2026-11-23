@@ -4,8 +4,8 @@ resources:
 - deployment.yaml
 - service.yaml
 - ingress.yaml
-namespace: python-app-green
+namespace: python-app-blue
 images:
 - name: hello-gitops
   newName: marlyt/hello-gitops
-  newTag: bb30ccbab736c13e11a16934f7515c095bd01cb1
+  newTag: e08d4bb6f7fb23b43c687b0fcc9d5f69475c0cd4

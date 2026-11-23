@@ -75,14 +75,9 @@ jobs:
     name: Deploy
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write
       id-token: write
     needs: build
-
-    env:
-      PROJECT_ID: ${{ secrets.GKE_PROJECT }}
-      GKE_CLUSTER: my-cluster-gitops
-      GKE_REGION: us-central1
 
     steps:
     - name: Check out code
@@ -96,7 +91,7 @@ jobs:
       uses: google-github-actions/get-gke-credentials@v3
       with:
         cluster_name: "my-cluster-gitops"
-        location: "us-central1" # Region or zone of your GKE cluster
+        location: "us-central1"
 
     - name: Install Kustomize
       run: |

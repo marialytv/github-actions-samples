@@ -1,20 +1,30 @@
 import configparser
+from pathlib import Path
+from typing import Optional, Union
 from flask import Flask
 
-config = configparser.RawConfigParser()
-config.read('config.properties')
+def create_app(config_path: Optional[Union[str, Path]] = None) -> Flask:
+    app = Flask(__name__)
 
-app = Flask(__name__)
+    if config_path is None:
+        config_path = Path(__file__).resolve().parent / "config.properties"
 
-if config.getboolean("features", "feature_1"):
-	message = "Hello, Maria!"
-else:
-	message = "Hello, World!"
+    config = configparser.ConfigParser()
+    loaded = config.read(config_path)
+    if not loaded:
+        raise FileNotFoundError(f"Config file not found at: {config_path}")
 
-@app.route('/')
-def hello():
-    return message
+    @app.route("/")
+    def hello():
+        if config.getboolean("features", "feature_1"):
+            message = "Hello, Maria!"
+        else:
+            message = "Hello, World!"
+        return message
 
-if __name__ == '__main__':
-    # Run on all interfaces so it can be exposed outside the container
-    app.run(host='0.0.0.0', port=8050)
+    return app
+
+
+if __name__ == "__main__":
+    application = create_app()
+    application.run(host="0.0.0.0", port=8050)

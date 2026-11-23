@@ -62,8 +62,8 @@ jobs:
     - name: Build and push
       uses: docker/build-push-action@v5
       with:
-        context: ./app
-        file: ./app/Dockerfile
+        context: ./flask-app
+        file: ./flask-app/Dockerfile
         builder: ${{ steps.buildx.outputs.name }}
         push: true
         tags: ${{ secrets.DOCKER_USERNAME }}/hello-gitops:${{ github.sha }}, ${{ secrets.DOCKER_USERNAME }}/hello-gitops:latest

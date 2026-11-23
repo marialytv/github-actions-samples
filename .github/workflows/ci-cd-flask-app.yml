@@ -95,7 +95,7 @@ jobs:
     - id: get-credentials
       uses: google-github-actions/get-gke-credentials@v3
       with:
-        cluster_name: "your-gke-cluster"
+        cluster_name: "my-cluster-gitops"
         location: "us-central1" # Region or zone of your GKE cluster
 
     - name: Install Kustomize

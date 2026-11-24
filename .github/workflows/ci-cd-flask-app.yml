@@ -62,7 +62,7 @@ jobs:
       - name: Update inactive slot image tag in kustomization.yaml
         env:
           TARGET_SLOT: ${{ steps.slots.outputs.target }}
-          IMAGE_URI: docker.io/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}
+          IMAGE_URI: ${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}
         run: |
           cd k8s
           kustomize edit set image "test-cd-app-${TARGET_SLOT}=${IMAGE_URI}:${{ github.sha }}"

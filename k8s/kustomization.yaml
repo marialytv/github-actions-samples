@@ -9,10 +9,10 @@ resources:
 images:
   - name: test-cd-app-blue
     newName: marlyt/test-cd-app
-    newTag: initial-sha
+    newTag: latest
   - name: test-cd-app-green
     newName: marlyt/test-cd-app
-    newTag: initial-sha
+    newTag: latest
 
 patches:
   - target:

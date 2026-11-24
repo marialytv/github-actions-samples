@@ -10,12 +10,12 @@ images:
     newTag: ed5e752bf3ad6d2c0d41d2cc289ded33524e2bee
   - name: test-cd-app-green
     newName: marlyt/test-cd-app
-    newTag: latest
+    newTag: 35b730d0bdb89a65651965847f94bf874013e085
 patches:
   - patch: |-
       - op: replace
         path: /spec/selector/slot
-        value: blue
+        value: green
     target:
       kind: Service
       name: test-cd-app

@@ -1,11 +1,24 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
+
 resources:
-- deployment.yaml
-- service.yaml
-- ingress.yaml
-namespace: python-app-green
+  - service.yaml
+  - deployment-blue.yaml
+  - deployment-green.yaml
+
 images:
-- name: hello-gitops
-  newName: marlyt/hello-gitops
-  newTag: cd8932aef0e1ed1a2f8e922fe8aee45b9068f97a
+  - name: test-cd-app-blue
+    newName: marlyt/test-cd-app
+    newTag: initial-sha
+  - name: test-cd-app-green
+    newName: marlyt/test-cd-app
+    newTag: initial-sha
+
+patches:
+  - target:
+      kind: Service
+      name: test-cd-app
+    patch: |-
+      - op: replace
+        path: /spec/selector/slot
+        value: blue

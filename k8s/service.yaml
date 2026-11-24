@@ -1,14 +1,15 @@
 apiVersion: v1
 kind: Service
 metadata:
+  name: test-cd-app
   labels:
-    app: hello-gitops
-  name: hello-gitops
+    app: test-cd-app
 spec:
+  type: LoadBalancer
+  selector:
+    app: test-cd-app
+    slot: blue
   ports:
     - name: http
       port: 8050
-      targetPort: http
-  selector:
-    app: hello-gitops
-  type: LoadBalancer
+      targetPort: 8080

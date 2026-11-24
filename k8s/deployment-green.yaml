@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: test-cd-app-green
+  labels:
+    app: test-cd-app
+    slot: green
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: test-cd-app
+      slot: green
+  template:
+    metadata:
+      labels:
+        app: test-cd-app
+        slot: green
+    spec:
+      containers:
+        - name: app
+          image: test-cd-app-green
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5

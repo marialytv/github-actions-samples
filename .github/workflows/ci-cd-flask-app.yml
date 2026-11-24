@@ -17,18 +17,22 @@ jobs:
     permissions:
       contents: write
       id-token: write
+    env:
+      IMAGE_NAME: test-cd-app
+      NAMESPACE: default
 
     steps:
-      - name: Check out code
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
-      - id: auth
+      - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
-      - id: get-credentials
+
+      - name: Set up Cloud SDK & GKE credentials
         uses: google-github-actions/get-gke-credentials@v3
         with:
           cluster_name: "my-cluster-gitops"
@@ -40,58 +44,97 @@ jobs:
           sudo mv kustomize /usr/local/bin/
           kustomize version
 
-      - name: Create namespace & set in Kustomize
-        run: |
-          namespacePresentBlue=`kubectl get ns | grep python-app-blue | wc -l`
-          namespacePresentGreen=`kubectl get ns | grep python-app-green | wc -l`
-          if [ $namespacePresentBlue -eq 0 ]
-          then
-             kubectl create ns python-app-blue
-             cd k8s
-             kustomize edit set namespace python-app-blue
-             echo "NEW_NAMESPACE=python-app-blue" >> $GITHUB_ENV
-             echo "OLD_NAMESPACE=python-app-green" >> $GITHUB_ENV
-          elif [ $namespacePresentGreen -eq 0 ]
-          then
-             kubectl create ns python-app-green
-             cd k8s
-             kustomize edit set namespace python-app-green
-             echo "NEW_NAMESPACE=python-app-green" >> $GITHUB_ENV
-             echo "OLD_NAMESPACE=python-app-blue" >> $GITHUB_ENV
-          else
-             echo "Both Blue and Green namespaces are present! Exiting"
-             exit 1
-          fi
-
-      - name: Update Kubernetes resources
+      - name: Update kustomization.yml with GITHUB_SHA
+        working-directory: k8s
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
-          cd k8s
-          kustomize edit set image hello-gitops=$DOCKER_USERNAME/hello-gitops:$GITHUB_SHA
-          cat kustomization.yaml
+          SHORT_SHA="${GITHUB_SHA:0:7}"
 
-      - name: Deploy updated Kubernetes resources
-        run: |
-          kubectl apply -k k8s/ 
+          # Store GITHUB_SHA as newTag in kustomization.yml
+          kustomize edit set image test-cd-app="${DOCKER_USERNAME}/test-cd-app:${GITHUB_SHA}"
 
-      # REMOVE OLD DEPLOYMENT!!
-      - name: Remove old namespace
+          kustomize edit set namesuffix -- "-${SHORT_SHA}"
+
+          # Set pod & selector label version=<GITHUB_SHA>
+          yq e '.labels[0].pairs.version = strenv(GITHUB_SHA)' -i kustomization.yml
+
+      - name: Deploy Green version side-by-side with Blue
+        id: deploy_green
         run: |
-          namespacePresentOld=`kubectl get ns | grep ${{ env.OLD_NAMESPACE }} | wc -l`
-          if [ $namespacePresentOld -eq 1 ]
-          then
-            kubectl delete ns ${{ env.OLD_NAMESPACE }} --wait=true
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          
+          # Ensure base Service exists without overwriting active version selector
+          kubectl get service test-cd-app -n "${NAMESPACE}" >/dev/null 2>&1 || \
+          kubectl apply -f k8s/service.yaml -n "${NAMESPACE}"
+          
+          # Capture currently active Blue version before deploying Green
+          OLD_VERSION=$(kubectl get service test-cd-app -n "${NAMESPACE}" \
+          -o jsonpath='{.spec.selector.version}' 2>/dev/null || echo "")
+          echo "old_version=${OLD_VERSION}" >> "$GITHUB_OUTPUT"
+          
+          # Apply Green deployment alongside Blue
+          kustomize build k8s/ | kubectl apply -n "${NAMESPACE}" -f -
+          
+          # Wait for Green rollout to complete
+          kubectl rollout status "deployment/test-cd-app-${SHORT_SHA}" -n "${NAMESPACE}" --timeout=180s
+
+      - name: Smoke-test Green pods before traffic cutover
+        run: |
+          kubectl run "smoke-${GITHUB_SHA:0:7}" \
+            --rm -i --restart=Never \
+            --image=curlimages/curl:8.10.1 \
+            -n "${NAMESPACE}" -- \
+            sh -c '
+              POD_IP=$(kubectl get pods -l app=test-cd-app,version='"${GITHUB_SHA}"' -o jsonpath="{.items[0].status.podIP}" 2>/dev/null || true)
+              echo "Testing Green deployment for version '"${GITHUB_SHA}"'"
+            '
+          # Verify at least 1 Ready endpoint exists for the Green label selector
+          READY_PODS=$(kubectl get pods -n "${NAMESPACE}" \
+            -l "app=test-cd-app,version=${GITHUB_SHA}" \
+            --field-selector=status.phase=Running \
+            -o jsonpath='{.items[*].status.containerStatuses[0].ready}' | grep -o "true" | wc -l)
+
+          if [ "$READY_PODS" -lt 1 ]; then
+            echo "No ready Green pods found"
+            exit 1
           fi
 
-      - name: Commit files
+      - name: Switch Service traffic to Green (GITHUB_SHA)
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git commit -am "Bump docker tag"
+          kubectl patch service test-cd-app -n "${NAMESPACE}" \
+            -p "{\"spec\":{\"selector\":{\"version\":\"${GITHUB_SHA}\"}}}"
 
-      - name: Push changes
-        uses: ad-m/github-push-action@master
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Delete previous Blue deployment
+        if: success()
+        env:
+          OLD_VERSION: ${{ steps.deploy_green.outputs.old_version }}
+        run: |
+          if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$GITHUB_SHA" ]; then
+            OLD_SHORT_SHA="${OLD_VERSION:0:7}"
+            echo "Deleting old deployment test-cd-app-${OLD_SHORT_SHA}"
+            kubectl delete deployment "test-cd-app-${OLD_SHORT_SHA}" -n "${NAMESPACE}" --ignore-not-found
+          fi
+
+      - name: Rollback on failure
+        if: failure()
+        env:
+          OLD_VERSION: ${{ steps.deploy_green.outputs.old_version }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$GITHUB_SHA" ]; then
+            echo "Rolling back service test-cd-app to version ${OLD_VERSION}"
+            kubectl patch service test-cd-app -n "${NAMESPACE}" \
+              -p "{\"spec\":{\"selector\":{\"version\":\"${OLD_VERSION}\"}}}"
+          fi
+          kubectl delete deployment "test-cd-app-${SHORT_SHA}" -n "${NAMESPACE}" --ignore-not-found
+
+      - name: Commit updated kustomization.yml
+        if: success()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add k8s/kustomization.yml
+          git diff --staged --quiet || git commit -m "chore(k8s): update image tag to ${GITHUB_SHA:0:7} [skip ci]"
+          git push
 

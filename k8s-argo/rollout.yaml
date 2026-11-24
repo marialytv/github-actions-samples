@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: flask-app
-          image: marlyt/test-cd-app:edf974151b4f6b1bea78630c0adccf025626ca59
+          image: marlyt/test-cd-app:182330bc1759d36983b0a7dc30fb265913e95b4c
           ports:
             - containerPort: 8050
           readinessProbe:

@@ -44,20 +44,20 @@ jobs:
           sudo mv kustomize /usr/local/bin/
           kustomize version
 
-      - name: Update kustomization.yml with GITHUB_SHA
+      - name: Update kustomization.yaml with GITHUB_SHA
         working-directory: k8s
         env:
           DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
           SHORT_SHA="${GITHUB_SHA:0:7}"
 
-          # Store GITHUB_SHA as newTag in kustomization.yml
+          # Store GITHUB_SHA as newTag in kustomization.yaml
           kustomize edit set image test-cd-app="${DOCKER_USERNAME}/test-cd-app:${GITHUB_SHA}"
 
           kustomize edit set namesuffix -- "-${SHORT_SHA}"
 
           # Set pod & selector label version=<GITHUB_SHA>
-          yq e '.labels[0].pairs.version = strenv(GITHUB_SHA)' -i kustomization.yml
+          yq e '.labels[0].pairs.version = strenv(GITHUB_SHA)' -i kustomization.yaml
 
       - name: Deploy Green version side-by-side with Blue
         id: deploy_green
@@ -129,12 +129,12 @@ jobs:
           fi
           kubectl delete deployment "test-cd-app-${SHORT_SHA}" -n "${NAMESPACE}" --ignore-not-found
 
-      - name: Commit updated kustomization.yml
+      - name: Commit updated kustomization.yaml
         if: success()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add k8s/kustomization.yml
+          git add k8s/kustomization.yaml
           git diff --staged --quiet || git commit -m "chore(k8s): update image tag to ${GITHUB_SHA:0:7} [skip ci]"
           git push
 

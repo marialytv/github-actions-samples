@@ -21,10 +21,10 @@ spec:
         - name: app
           image: test-cd-app-blue
           ports:
-            - containerPort: 8080
+            - containerPort: 8050
           readinessProbe:
             httpGet:
               path: /
-              port: 8080
+              port: 8050
             initialDelaySeconds: 5
             periodSeconds: 5

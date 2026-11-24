@@ -11,5 +11,5 @@ spec:
     slot: blue
   ports:
     - name: http
-      port: 8050
-      targetPort: 8080
+      port: 80
+      targetPort: 8050

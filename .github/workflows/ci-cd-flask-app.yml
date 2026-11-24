@@ -37,6 +37,7 @@ jobs:
         with:
           cluster_name: "my-cluster-gitops"
           location: "us-central1"
+          namespace: ${{ env.NAMESPACE }}
 
       - name: Install Kustomize
         run: |
@@ -61,9 +62,10 @@ jobs:
       - name: Update inactive slot image tag in kustomization.yaml
         env:
           TARGET_SLOT: ${{ steps.slots.outputs.target }}
+          IMAGE_URI: docker.io/${{ secrets.DOCKER_USERNAME }}/${{ env.IMAGE_NAME }}
         run: |
           cd k8s
-          kustomize edit set image "test-cd-app-${TARGET_SLOT}="${DOCKER_USERNAME}/test-cd-app:${GITHUB_SHA}""
+          kustomize edit set image "test-cd-app-${TARGET_SLOT}=${IMAGE_URI}:${{ github.sha }}"
 
       - name: Deploy inactive slot and wait for readiness
         env:

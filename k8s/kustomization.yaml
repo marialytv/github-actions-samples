@@ -1,24 +1,21 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
-
 resources:
   - service.yaml
   - deployment-blue.yaml
   - deployment-green.yaml
-
 images:
   - name: test-cd-app-blue
     newName: marlyt/test-cd-app
-    newTag: latest
+    newTag: ed5e752bf3ad6d2c0d41d2cc289ded33524e2bee
   - name: test-cd-app-green
     newName: marlyt/test-cd-app
     newTag: latest
-
 patches:
-  - target:
-      kind: Service
-      name: test-cd-app
-    patch: |-
+  - patch: |-
       - op: replace
         path: /spec/selector/slot
         value: blue
+    target:
+      kind: Service
+      name: test-cd-app

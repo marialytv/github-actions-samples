@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Optional, Union
 from flask import Flask
 
+
 def create_app(config_path: Optional[Union[str, Path]] = None) -> Flask:
     app = Flask(__name__)
 
@@ -17,7 +18,7 @@ def create_app(config_path: Optional[Union[str, Path]] = None) -> Flask:
     @app.route("/")
     def hello():
         if config.getboolean("features", "feature_1"):
-            message = "Hello, Maria!!"
+            message = "Hello, Maria!"
         else:
             message = "Hello, World!"
         return message

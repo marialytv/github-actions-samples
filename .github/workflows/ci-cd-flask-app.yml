@@ -43,98 +43,49 @@ jobs:
           curl -sL https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.8.3/kustomize_v5.8.3_linux_amd64.tar.gz | tar xz
           sudo mv kustomize /usr/local/bin/
           kustomize version
+          
 
-      - name: Update kustomization.yaml with GITHUB_SHA
-        working-directory: k8s
-        env:
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      - name: Determine active and target slots
+        id: slots
         run: |
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-
-          # Store GITHUB_SHA as newTag in kustomization.yaml
-          kustomize edit set image test-cd-app="${DOCKER_USERNAME}/test-cd-app:${GITHUB_SHA}"
-
-          kustomize edit set namesuffix -- "-${SHORT_SHA}"
-
-          # Set pod & selector label version=<GITHUB_SHA>
-          yq e '.labels[0].pairs.version = strenv(GITHUB_SHA)' -i kustomization.yaml
-
-      - name: Deploy Green version side-by-side with Blue
-        id: deploy_green
-        run: |
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          
-          # Ensure base Service exists without overwriting active version selector
-          kubectl get service test-cd-app -n "${NAMESPACE}" >/dev/null 2>&1 || \
-          kubectl apply -f k8s/service.yaml -n "${NAMESPACE}"
-          
-          # Capture currently active Blue version before deploying Green
-          OLD_VERSION=$(kubectl get service test-cd-app -n "${NAMESPACE}" \
-          -o jsonpath='{.spec.selector.version}' 2>/dev/null || echo "")
-          echo "old_version=${OLD_VERSION}" >> "$GITHUB_OUTPUT"
-          
-          # Apply Green deployment alongside Blue
-          kustomize build k8s/ | kubectl apply -n "${NAMESPACE}" -f -
-          
-          # Wait for Green rollout to complete
-          kubectl rollout status "deployment/test-cd-app-${SHORT_SHA}" -n "${NAMESPACE}" --timeout=180s
-
-      - name: Smoke-test Green pods before traffic cutover
-        run: |
-          kubectl run "smoke-${GITHUB_SHA:0:7}" \
-            --rm -i --restart=Never \
-            --image=curlimages/curl:8.10.1 \
-            -n "${NAMESPACE}" -- \
-            sh -c '
-              POD_IP=$(kubectl get pods -l app=test-cd-app,version='"${GITHUB_SHA}"' -o jsonpath="{.items[0].status.podIP}" 2>/dev/null || true)
-              echo "Testing Green deployment for version '"${GITHUB_SHA}"'"
-            '
-          # Verify at least 1 Ready endpoint exists for the Green label selector
-          READY_PODS=$(kubectl get pods -n "${NAMESPACE}" \
-            -l "app=test-cd-app,version=${GITHUB_SHA}" \
-            --field-selector=status.phase=Running \
-            -o jsonpath='{.items[*].status.containerStatuses[0].ready}' | grep -o "true" | wc -l)
-
-          if [ "$READY_PODS" -lt 1 ]; then
-            echo "No ready Green pods found"
-            exit 1
+          ACTIVE_SLOT=$(kubectl get service test-cd-app -n "${{ env.NAMESPACE }}" -o jsonpath='{.spec.selector.slot}' 2>/dev/null || echo "blue")
+          if [ "$ACTIVE_SLOT" == "blue" ]; then
+            TARGET_SLOT="green"
+          else
+            TARGET_SLOT="blue"
           fi
+          echo "active=$ACTIVE_SLOT" >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET_SLOT" >> "$GITHUB_OUTPUT"
+          echo "Active slot: $ACTIVE_SLOT | Deploying to target slot: $TARGET_SLOT"
 
-      - name: Switch Service traffic to Green (GITHUB_SHA)
-        run: |
-          kubectl patch service test-cd-app -n "${NAMESPACE}" \
-            -p "{\"spec\":{\"selector\":{\"version\":\"${GITHUB_SHA}\"}}}"
-
-      - name: Delete previous Blue deployment
-        if: success()
+      - name: Update inactive slot image tag in kustomization.yaml
         env:
-          OLD_VERSION: ${{ steps.deploy_green.outputs.old_version }}
+          TARGET_SLOT: ${{ steps.slots.outputs.target }}
         run: |
-          if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$GITHUB_SHA" ]; then
-            OLD_SHORT_SHA="${OLD_VERSION:0:7}"
-            echo "Deleting old deployment test-cd-app-${OLD_SHORT_SHA}"
-            kubectl delete deployment "test-cd-app-${OLD_SHORT_SHA}" -n "${NAMESPACE}" --ignore-not-found
-          fi
+          cd k8s
+          kustomize edit set image "test-cd-app-${TARGET_SLOT}="${DOCKER_USERNAME}/test-cd-app:${GITHUB_SHA}""
 
-      - name: Rollback on failure
-        if: failure()
+      - name: Deploy inactive slot and wait for readiness
         env:
-          OLD_VERSION: ${{ steps.deploy_green.outputs.old_version }}
+          TARGET_SLOT: ${{ steps.slots.outputs.target }}
         run: |
-          SHORT_SHA="${GITHUB_SHA:0:7}"
-          if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$GITHUB_SHA" ]; then
-            echo "Rolling back service test-cd-app to version ${OLD_VERSION}"
-            kubectl patch service test-cd-app -n "${NAMESPACE}" \
-              -p "{\"spec\":{\"selector\":{\"version\":\"${OLD_VERSION}\"}}}"
-          fi
-          kubectl delete deployment "test-cd-app-${SHORT_SHA}" -n "${NAMESPACE}" --ignore-not-found
+          kubectl apply -k k8s/ -n "${{ env.NAMESPACE }}"
+          kubectl rollout status "deployment/test-cd-app-${TARGET_SLOT}" -n "${{ env.NAMESPACE }}" --timeout=5m
+
+      - name: Switch Service selector to target slot
+        env:
+          TARGET_SLOT: ${{ steps.slots.outputs.target }}
+        run: |
+          yq eval '(.patches[] | select(.target.name == "test-cd-app") | .patch) |= sub("value: (blue|green)", "value: " + env(TARGET_SLOT))' -i k8s/kustomization.yaml
+          kubectl apply -k k8s/ -n "${{ env.NAMESPACE }}"
 
       - name: Commit updated kustomization.yaml
-        if: success()
+        env:
+          TARGET_SLOT: ${{ steps.slots.outputs.target }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add k8s/kustomization.yaml
-          git diff --staged --quiet || git commit -m "chore(k8s): update image tag to ${GITHUB_SHA:0:7} [skip ci]"
+          git diff --staged --quiet || git commit -m "chore(k8s): deploy ${{ github.sha }} to ${TARGET_SLOT} [skip ci]"
           git push
 
